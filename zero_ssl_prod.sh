@@ -1,7 +1,7 @@
 #!/bin/bash
-set -x
+#set -x
 
-API_KEY="ab846e72191e235e44de30589dab02c5"
+API_KEY="d26c350f24da603a5d9b84cf6dbeceb0"
 API_ENDPOINT="https://api.zerossl.com/certificates"
 CERT_NAME="$1"
 
@@ -20,7 +20,7 @@ create_cert() {
     cat "$txt_file_name"
 
     # Check if Nginx is active on remote server
-    ssh -i /home/ubuntu/cert/prakash-test.pem ubuntu@"$CERT_NAME" 'sudo systemctl is-active --quiet nginx'
+    ssh root@"$CERT_NAME" 'sudo systemctl is-active --quiet nginx'
 
     # Check the exit status of the SSH command
     if [ $? -eq 0 ]; then
@@ -34,33 +34,34 @@ create_cert() {
 # Function to move the verification file
 move_http_file() {
     LOCAL_FILE="$txt_file_name"
-    EC2_INSTANCE="ubuntu@$CERT_NAME:/var/www/html/.well-known/pki-validation/"
+    EC2_INSTANCE="root@$CERT_NAME:/usr/share/nginx/html/.well-known/pki-validation/"
 
     # Copy file using SCP
-    scp -i /home/ubuntu/cert/prakash-test.pem "$LOCAL_FILE" "$EC2_INSTANCE"
+    scp "$LOCAL_FILE" "$EC2_INSTANCE"
 
     if [ $? -eq 0 ]; then
-        echo "File copied successfully."
+        echo "HTTP File Copied To The Domain Successfully."
         certificate_verify
     else
         echo "File not copied. SCP operation failed."
     fi
 
-    sleep 10
+    sleep 5
 }
 
 # Function to verify and download the certificate
 certificate_verify() {
-    verify_response=$(curl -s -X POST "$API_ENDPOINT/$id/challenges?access_key=$API_KEY" -d validation_method=HTTPS_CSR_HASH)
-    echo "Verify response: $verify_response"
+    verify_response=$(curl -s -X POST "$API_ENDPOINT/$id/challenges?access_key=$API_KEY" -d validation_method=HTTP_CSR_HASH)
+    #echo "Verify response: $verify_response"
     sleep 20
 
     verify_response_check=$(echo "$verify_response" | jq -r '.type')
 
     if [ "$verify_response_check" = "1" ]; then
+        echo " The Certificate Downloading is Initiated "
         download_cert
     else
-        echo "Type is not 1. Skipping certificate creation."
+        echo "Bad verify response. Skipping certificate download."
     fi
 }
 
@@ -68,16 +69,16 @@ certificate_verify() {
 download_cert() {
     download_response=$(curl -s "$API_ENDPOINT/$id/download/return?access_key=$API_KEY")
 
-    echo "Download Response: $download_response"
+    #echo "Download Response: $download_response"
     curl -s "$API_ENDPOINT/$id/download/return?access_key=$API_KEY" | jq -r '."certificate.crt"' > "certificate.crt"
     curl -s "$API_ENDPOINT/$id/download/return?access_key=$API_KEY" | jq -r '."ca_bundle.crt"' > "ca_bundle.crt"
-    cat certificate.crt ca_bundle.crt >> fullchain.pem
+    cat certificate.crt ca_bundle.crt >> certificate.crt
 
     # Copy certificate and key to remote server
-    scp -i /home/ubuntu/cert/prakash-test.pem certificate.crt private.key "ubuntu@$CERT_NAME:/etc/ssl"
+    scp certificate.crt private.key "root@$CERT_NAME:/etc/ssl"
 
     # Reload Nginx on remote server
-    ssh -i /home/ubuntu/cert/prakash-test.pem ubuntu@"$CERT_NAME" 'sudo systemctl reload nginx'
+    ssh root@"$CERT_NAME" 'sudo systemctl reload nginx'
     sleep 5
 
     # Clean up temporary files
@@ -104,5 +105,5 @@ echo "Create response type: $create_response_check"
 if [ "$create_response_check" = "1" ]; then
     create_cert
 else
-    echo "Type is not 1. Skipping certificate creation."
+    echo "Bad Response. Skipping certificate creation."
 fi
