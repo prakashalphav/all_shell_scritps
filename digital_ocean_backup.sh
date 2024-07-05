@@ -1,6 +1,6 @@
 #!/bin/bash
 #set -x
-API_KEY="daf7c37d705e8a57a"
+API_KEY="dop_v1_f1a"
 
 response_page1=$(curl -sS -X GET -H "Content-Type: application/json" -H "Authorization: Bearer $API_KEY" "https://api.digitalocean.com/v2/droplets?page=1&per_page=200")
 
@@ -113,8 +113,6 @@ unassign_reserved_ip() {
 unassign_reserved_ip_response=$(curl -X DELETE -H "Content-Type: application/json" -H "Authorization: Bearer $API_KEY" "https://api.digitalocean.com/v2/reserved_ips/$reserved_ip")
  }
 
-#unassign_reserved_ip
-
 delete_droplet() {
 
     echo "Executing the create function..."
@@ -123,7 +121,6 @@ delete_droplet() {
     delete_response=$( curl -X DELETE   -H "Content-Type: application/json"   -H "Authorization: Bearer $API_KEY"   "https://api.digitalocean.com/v2/droplets?tag_name=$delete_droplet_name")
     echo "$delete_response" >> delete_response.json
 }
-#delete_response
 
 get_droplet() {
     echo "Executing the assinging Reserved IP function..."
@@ -138,35 +135,54 @@ get_droplet() {
     fi
 }
 
-ssh_operation () {
 
+ssh_operations() {
+  
+    config_dir="/etc/nginx/conf.d"
     echo "Executing the conf file copying function..."
     echo "Please enter the Droplet(server) Reserved IP for copying the conf file"
     read server_ip
+    echo "Enter the server SSH Password"
+    read password
     echo "Enter the conf file name:"
-    read conf_file_name
-    echo "Enter the conf file content:"
-    read conf_file_content
-    touch
+    read config_file_name
+    echo "Enter the conf file content (use Ctrl+D twice to finish input):"
+    config_file_content=$(</dev/stdin)
+    echo "$config_file_content" > "$config_file_name"
+    echo "$config_file_name"
+    sleep 2
+    sshpass -p "$password" ssh root@"$server_ip" "
+    for file in \"$config_dir\"/*.conf; do
+        if [ -f \"\$file\" ]; then
+            filename=\$(basename \"\$file\")
+            mv \"\$file\" \"$config_dir/\${filename}.bkp\"
+            echo \"Moved \$file to \${filename}.bkp\"
+        fi
+    done
+"
+    sleep 1
+    sshpass -p "$password" scp "$config_file_name" root@"$server_ip":/etc/nginx/conf.d/"$config_file_name"
+    #sshpass -p "$password" scp "$config_file_name" root@"$server_ip":/root/"$config_file_name"
+    sleep 2
+    output=$(sshpass -p "$password" ssh -o StrictHostKeyChecking=no root@"$server_ip" 'nginx -t' 2>&1)
+
+    if [[ "$output" == *"syntax is ok"* && "$output" == *"test is successful"* ]]; then
+        echo "nginx configuration syntax is ok"
 
 
-
-
-
+        sshpass -p "$password" ssh -o StrictHostKeyChecking=no root@"$server_ip" 'sudo systemctl is-active --quiet nginx'
+        
+        if [ $? -eq 0 ]; then
+            echo "Nginx service is active. Reloading nginx."
+            sshpass -p "$password" ssh -o StrictHostKeyChecking=no root@"$server_ip" 'sudo systemctl reload nginx'
+        else
+            echo "Nginx service is not active. Restarting nginx."
+            sshpass -p "$password" ssh -o StrictHostKeyChecking=no root@"$server_ip" 'sudo systemctl restart nginx'
+        fi
+    else
+        echo "nginx configuration test failed. Please check nginx configuration."
+    fi
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 # Main script starts here
 echo "Welcome to the script!"
@@ -194,5 +210,5 @@ case $option in
     f) unassign_reserved_ip;;
     g) ssh_operations;;
     h) echo "Exiting script..... .... ... .. . "; exit 0;; 
-    *) echo "Invalid option. Please select a, b, or c." ;;
+    *) echo "Invalid option. Please select a, b, or c ............." ;;
 esac
